@@ -1,0 +1,849 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Heart Jump: Valentine Run</title>
+  <style>
+    :root{
+      --bg:#ffd6e7;           /* pastel pink */
+      --panel:#fff2f7;        /* soft panel */
+      --ink:#5a2a3a;          /* warm ink */
+      --accent:#ff6fa3;       /* valentine accent */
+      --accent2:#ff9fc2;      /* lighter accent */
+      --mint:#c9f4e5;         /* safe-zone tint */
+      --shadow: rgba(90,42,58,0.14);
+    }
+    html,body{height:100%}
+    body{
+      margin:0;
+      font-family: ui-rounded, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji";
+      background:
+        radial-gradient(1200px 600px at 15% 20%, rgba(255,255,255,0.55), transparent 55%),
+        radial-gradient(900px 500px at 85% 30%, rgba(255,255,255,0.35), transparent 60%),
+        linear-gradient(180deg, var(--bg), #ffe7f1 55%, #fff4f8);
+      color:var(--ink);
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding:18px;
+      box-sizing:border-box;
+    }
+    .wrap{
+      width:min(980px, 100%);
+      display:grid;
+      grid-template-columns: 1fr;
+      gap:12px;
+    }
+    .hud{
+      background: var(--panel);
+      border-radius: 18px;
+      box-shadow: 0 10px 30px var(--shadow);
+      padding: 12px 14px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      flex-wrap:wrap;
+      border: 1px solid rgba(255,111,163,0.18);
+      backdrop-filter: blur(6px);
+    }
+    .hud .left{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      flex-wrap:wrap;
+    }
+    .badge{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      padding:8px 10px;
+      border-radius: 999px;
+      background: rgba(255,111,163,0.12);
+      border:1px solid rgba(255,111,163,0.22);
+      font-weight:600;
+    }
+    .badge small{opacity:.75;font-weight:600}
+    .btn{
+      cursor:pointer;
+      border:0;
+      border-radius: 999px;
+      padding: 10px 14px;
+      background: linear-gradient(180deg, var(--accent), #ff4b92);
+      color:white;
+      font-weight:800;
+      box-shadow: 0 10px 22px rgba(255,79,146,0.25);
+      transition: transform .08s ease, filter .15s ease;
+      user-select:none;
+    }
+    .btn:active{transform: translateY(1px) scale(0.99); filter:brightness(0.98)}
+    .btn.secondary{
+      background: rgba(90,42,58,0.08);
+      color: var(--ink);
+      box-shadow:none;
+      border: 1px solid rgba(90,42,58,0.12);
+      font-weight:800;
+    }
+    canvas{
+      width: 100%;
+      height: 560px;
+      background:
+        radial-gradient(900px 400px at 50% 0%, rgba(255,255,255,0.6), transparent 60%),
+        linear-gradient(180deg, rgba(255,255,255,0.28), transparent 40%),
+        linear-gradient(180deg, #ffe4ef, #ffeef6 55%, #fff6fa);
+      border-radius: 22px;
+      box-shadow: 0 14px 40px var(--shadow);
+      border: 1px solid rgba(255,111,163,0.16);
+      display:block;
+    }
+    .help{
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+      opacity:.9;
+    }
+    .key{
+      padding:6px 10px;
+      border-radius: 12px;
+      background: rgba(255,111,163,0.10);
+      border:1px solid rgba(255,111,163,0.18);
+      font-weight:700;
+    }
+    .note{opacity:.8;font-weight:600}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="hud">
+      <div class="left">
+        <div class="badge">💗 <span id="statusText">Click Start to begin</span></div>
+        <div class="badge"><small>Distance</small> <span id="distText">0%</span></div>
+        <div class="badge"><small>Arrows Dodged</small> <span id="dodgedText">0</span></div>
+        <div class="help">
+          <div class="key">← → / A D</div>
+          <div class="key">Space / W / ↑</div>
+          <div class="key">R</div>
+          <div class="note">Jump + dodge Cupid’s arrows to reach the Safe Zone 💞</div>
+        </div>
+      </div>
+      <div class="right">
+        <button class="btn" id="startBtn">Start (with heartbeat)</button>
+        <button class="btn secondary" id="muteBtn">Mute</button>
+      </div>
+    </div>
+ 
+    <canvas id="game" width="980" height="560"></canvas>
+  </div>
+ 
+<script>
+(() => {
+  const canvas = document.getElementById("game");
+  const ctx = canvas.getContext("2d");
+ 
+  const statusText = document.getElementById("statusText");
+  const distText = document.getElementById("distText");
+  const dodgedText = document.getElementById("dodgedText");
+  const startBtn = document.getElementById("startBtn");
+  const muteBtn = document.getElementById("muteBtn");
+ 
+  // ----------------------------
+  // Game constants (tune vibe)
+  // ----------------------------
+  const W = canvas.width, H = canvas.height;
+  const GRAVITY = 1600;               // px/s^2
+  const MOVE_ACCEL = 4200;            // px/s^2
+  const MOVE_FRICTION = 0.86;         // velocity damping
+  const MAX_SPEED = 420;              // px/s
+  const JUMP_VELOCITY = 680;          // px/s
+  const COYOTE_TIME = 0.10;           // seconds after leaving ground still jumpable
+  const JUMP_BUFFER = 0.12;           // seconds jump input buffered
+ 
+  const WORLD_LEN = 5200;             // level length in px
+  const SAFE_ZONE_W = 260;            // safe zone width
+  const ARROW_SPAWN_BASE = 1.25;      // seconds between arrows baseline
+  const ARROW_SPEED_MIN = 360;
+  const ARROW_SPEED_MAX = 620;
+ 
+  // Soft palette
+  const COLORS = {
+    ink: "#5a2a3a",
+    accent: "#ff6fa3",
+    accent2: "#ff9fc2",
+    pastel: "#ffd6e7",
+    panel: "rgba(255,242,247,0.92)",
+    platform: "rgba(255,111,163,0.17)",
+    platformEdge: "rgba(255,111,163,0.34)",
+    cloud: "rgba(255,255,255,0.55)",
+    safe: "rgba(201,244,229,0.55)",
+    safeEdge: "rgba(57,160,122,0.40)",
+    arrow: "#d84c7d",
+    arrowTip: "#5a2a3a",
+    broken: "#ff4b92"
+  };
+ 
+  // ----------------------------
+  // Audio: slow heartbeat (WebAudio)
+  // ----------------------------
+  let audioCtx = null;
+  let heartbeatTimer = null;
+  let isMuted = false;
+ 
+  function ensureAudio() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+ 
+  function playClickyBeat(time, gainNode) {
+    // A short thump (sine + quick envelope), like a soft heartbeat.
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(90, time);
+ 
+    gain.gain.setValueAtTime(0.0001, time);
+    gain.gain.exponentialRampToValueAtTime(0.26, time + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.11);
+ 
+    osc.connect(gain).connect(gainNode);
+    osc.start(time);
+    osc.stop(time + 0.13);
+  }
+ 
+  function startHeartbeat() {
+    if (isMuted) return;
+    ensureAudio();
+    if (audioCtx.state === "suspended") audioCtx.resume();
+ 
+    stopHeartbeat();
+ 
+    const master = audioCtx.createGain();
+    master.gain.value = 0.30; // gentle
+    master.connect(audioCtx.destination);
+ 
+    // Slow tempo: ~72 BPM (beat every ~0.83s) with a double-thump
+    const bpm = 72;
+    const interval = 60 / bpm; // seconds per beat
+    let next = audioCtx.currentTime + 0.05;
+ 
+    heartbeatTimer = setInterval(() => {
+      if (!audioCtx || isMuted) return;
+      const t = Math.max(next, audioCtx.currentTime + 0.01);
+      // "lub-dub": two thumps close together
+      playClickyBeat(t, master);
+      playClickyBeat(t + 0.18, master);
+      next = t + interval;
+    }, 120);
+  }
+ 
+  function stopHeartbeat() {
+    if (heartbeatTimer) {
+      clearInterval(heartbeatTimer);
+      heartbeatTimer = null;
+    }
+  }
+ 
+  function setMuted(m) {
+    isMuted = m;
+    muteBtn.textContent = isMuted ? "Unmute" : "Mute";
+    if (isMuted) stopHeartbeat();
+    else if (running) startHeartbeat();
+  }
+ 
+  // ----------------------------
+  // Input
+  // ----------------------------
+  const keys = new Set();
+  window.addEventListener("keydown", (e) => {
+    const k = e.key.toLowerCase();
+    keys.add(k);
+    if ([" ", "arrowup", "arrowdown", "arrowleft", "arrowright"].includes(e.key)) e.preventDefault();
+    if (k === "r") reset();
+  }, { passive:false });
+ 
+  window.addEventListener("keyup", (e) => {
+    keys.delete(e.key.toLowerCase());
+  });
+ 
+  function pressedJump() {
+    return keys.has(" ") || keys.has("w") || keys.has("arrowup");
+  }
+  function axisX() {
+    const left = keys.has("a") || keys.has("arrowleft");
+    const right = keys.has("d") || keys.has("arrowright");
+    return (right ? 1 : 0) - (left ? 1 : 0);
+  }
+ 
+  // ----------------------------
+  // Level geometry
+  // ----------------------------
+  const platforms = [
+    // ground chunks
+    {x:0, y:500, w:900, h:60},
+    {x:980, y:500, w:820, h:60},
+    {x:1880, y:500, w:720, h:60},
+    {x:2720, y:500, w:680, h:60},
+    {x:3500, y:500, w:820, h:60},
+    {x:4440, y:500, w:760, h:60},
+ 
+    // floaty platforms (soft jumper path)
+    {x:520, y:400, w:180, h:18},
+    {x:820, y:330, w:160, h:18},
+    {x:1140, y:380, w:180, h:18},
+    {x:1460, y:310, w:160, h:18},
+    {x:1760, y:360, w:180, h:18},
+ 
+    {x:2140, y:390, w:170, h:18},
+    {x:2420, y:320, w:150, h:18},
+    {x:2680, y:360, w:170, h:18},
+    {x:2980, y:300, w:150, h:18},
+    {x:3240, y:350, w:170, h:18},
+ 
+    {x:3700, y:390, w:170, h:18},
+    {x:3960, y:330, w:150, h:18},
+    {x:4200, y:370, w:170, h:18},
+ 
+    {x:4680, y:390, w:190, h:18},
+    {x:4960, y:330, w:170, h:18},
+  ];
+ 
+  const safeZone = { x: WORLD_LEN - SAFE_ZONE_W - 80, y: 420, w: SAFE_ZONE_W, h: 80 };
+ 
+  // ----------------------------
+  // Entities
+  // ----------------------------
+const cupid = {
+  x: safeZone.x + safeZone.w + 70,
+  y: 430,
+  w: 70,
+  h: 90
+};
+
+
+  const player = {
+    x: 80,
+    y: 440,
+    w: 46,
+    h: 42,
+    vx: 0,
+    vy: 0,
+    onGround: false,
+    coyote: 0,
+    jumpBuffer: 0,
+    broken: false
+  };
+ 
+  let arrows = [];
+  let lastArrowAt = 0;
+  let arrowsDodged = 0;
+ 
+  // Camera
+  let camX = 0;
+ 
+  // State
+  let running = false;
+  let won = false;
+  let lastT = performance.now();
+ 
+  // ----------------------------
+  // Helpers
+  // ----------------------------
+  function clamp(v, a, b){ return Math.max(a, Math.min(b, v)); }
+ 
+  function aabb(a, b){
+    return a.x < b.x + b.w && a.x + a.w > b.x &&
+           a.y < b.y + b.h && a.y + a.h > b.y;
+  }
+ 
+  function reset() {
+    player.x = 80; player.y = 440;
+    player.vx = 0; player.vy = 0;
+    player.onGround = false;
+    player.coyote = 0;
+    player.jumpBuffer = 0;
+    player.broken = false;
+ 
+    arrows = [];
+    lastArrowAt = 0;
+    arrowsDodged = 0;
+ 
+    camX = 0;
+    running = true;
+    won = false;
+    statusText.textContent = "Run, little heart 💗";
+    dodgedText.textContent = "0";
+    if (!isMuted) startHeartbeat();
+  }
+ 
+  function breakHeart() {
+    player.broken = true;
+    running = false;
+    statusText.textContent = "Oh no — broken heart 💔 (Press R to try again)";
+    stopHeartbeat();
+  }
+ 
+  function win() {
+    won = true;
+    running = false;
+    statusText.textContent = "Safe & sound 💞 You made it! (Press R to play again)";
+    stopHeartbeat();
+  }
+ 
+  // ----------------------------
+  // Arrow spawning (Cupid hazards)
+  // ----------------------------
+  function spawnArrow(nowSec) {
+  // Cupid shoots from the end area toward the player
+  const speed = ARROW_SPEED_MIN + Math.random() * (ARROW_SPEED_MAX - ARROW_SPEED_MIN);
+
+  // Start at Cupid’s bow area
+// If Cupid is offscreen to the right, spawn arrows just off the right edge
+const cupidOnScreen = (cupid.x - camX >= -50) && (cupid.x - camX <= W + 50);
+
+const startX = cupidOnScreen ? (cupid.x - 8) : (camX + W + 50);
+const startY = cupidOnScreen ? (cupid.y - 42) : (260 + Math.random() * 220);
+
+
+  // Aim roughly at the player's center with a little wobble (so it’s dodgeable)
+  const tx = player.x + player.w / 2;
+  const ty = player.y + player.h / 2 + (Math.random() * 80 - 40);
+
+  const dx = tx - startX;
+  const dy = ty - startY;
+  const len = Math.max(1, Math.hypot(dx, dy));
+
+  const vx = (dx / len) * speed;
+  const vy = (dy / len) * speed;
+
+  arrows.push({
+    x: startX,
+    y: startY,
+    w: 44,
+    h: 10,
+    vx,
+    vy,
+    spin: (Math.random() * 2 - 1) * 1.0,
+    rot: Math.atan2(vy, vx),
+    alive: true,
+    passed: false
+  });
+}
+
+ 
+  function arrowInterval(progress01) {
+    // Slightly more frequent later, but still gentle.
+    const t = ARROW_SPAWN_BASE - 0.45*progress01;  // from ~1.25s down to ~0.8s
+    return clamp(t, 0.78, 1.30);
+  }
+ 
+  // ----------------------------
+  // Physics & collision
+  // ----------------------------
+  function step(dt, nowSec) {
+    // Buffer jump input
+    if (pressedJump()) player.jumpBuffer = JUMP_BUFFER;
+    else player.jumpBuffer = Math.max(0, player.jumpBuffer - dt);
+ 
+    // Horizontal movement
+    const ax = axisX() * MOVE_ACCEL;
+    player.vx += ax * dt;
+ 
+    // Friction when no input
+    if (axisX() === 0) player.vx *= Math.pow(MOVE_FRICTION, dt * 60);
+ 
+    player.vx = clamp(player.vx, -MAX_SPEED, MAX_SPEED);
+ 
+    // Gravity
+    player.vy += GRAVITY * dt;
+ 
+    // Coyote time
+    if (player.onGround) player.coyote = COYOTE_TIME;
+    else player.coyote = Math.max(0, player.coyote - dt);
+ 
+    // Jump
+    if (player.jumpBuffer > 0 && (player.onGround || player.coyote > 0)) {
+      player.vy = -JUMP_VELOCITY;
+      player.onGround = false;
+      player.coyote = 0;
+      player.jumpBuffer = 0;
+    }
+ 
+    // Move X then collide
+    player.x += player.vx * dt;
+    resolveCollisions(true);
+ 
+    // Move Y then collide
+    player.y += player.vy * dt;
+    resolveCollisions(false);
+ 
+    // Keep within world bounds
+    player.x = clamp(player.x, 0, WORLD_LEN - player.w);
+    if (player.y > H + 200) breakHeart(); // fell off
+ 
+    // Camera follows, soft
+    const target = clamp(player.x - W*0.35, 0, WORLD_LEN - W);
+    camX += (target - camX) * (1 - Math.pow(0.001, dt)); // smooth
+ 
+    // Safe zone win
+    if (aabb({x:player.x, y:player.y, w:player.w, h:player.h}, safeZone)) win();
+ 
+    // Arrows
+    const progress01 = clamp(player.x / (WORLD_LEN - 1), 0, 1);
+    if (nowSec - lastArrowAt > arrowInterval(progress01)) {
+      spawnArrow(nowSec);
+      lastArrowAt = nowSec;
+    }
+ 
+    for (const ar of arrows) {
+      ar.x += ar.vx * dt;
+      ar.y += ar.vy * dt;
+      ar.rot += ar.spin * dt;
+ 
+      // dodge counting: passed player (in world space)
+      if (!ar.passed) {
+        const past = (ar.vx < 0 && ar.x + ar.w < player.x) || (ar.vx > 0 && ar.x > player.x + player.w);
+        if (past) {
+          ar.passed = true;
+          arrowsDodged++;
+          dodgedText.textContent = String(arrowsDodged);
+        }
+      }
+ 
+      // collision with player
+      if (aabb({x:player.x, y:player.y, w:player.w, h:player.h}, {x:ar.x, y:ar.y, w:ar.w, h:ar.h})) {
+        breakHeart();
+      }
+ 
+      // remove offscreen far
+      if (ar.x < camX - 160 || ar.x > camX + W + 160) ar.alive = false;
+    }
+    arrows = arrows.filter(a => a.alive);
+ 
+    // HUD distance
+    distText.textContent = Math.round(progress01 * 100) + "%";
+  }
+ 
+  function resolveCollisions(isX) {
+    player.onGround = false;
+ 
+    for (const p of platforms) {
+      const box = {x:player.x, y:player.y, w:player.w, h:player.h};
+      if (!aabb(box, p)) continue;
+ 
+      if (isX) {
+        if (player.vx > 0) player.x = p.x - player.w;
+        else if (player.vx < 0) player.x = p.x + p.w;
+        player.vx = 0;
+      } else {
+        if (player.vy > 0) {
+          player.y = p.y - player.h;
+          player.vy = 0;
+          player.onGround = true;
+        } else if (player.vy < 0) {
+          player.y = p.y + p.h;
+          player.vy = 0;
+        }
+      }
+    }
+  }
+ 
+  // ----------------------------
+  // Rendering
+  // ----------------------------
+  function drawSoftHeartsBackground() {
+    // faint floating hearts in the background (soft texture)
+    ctx.save();
+    ctx.globalAlpha = 0.12;
+    for (let i = 0; i < 18; i++) {
+      const bx = (i*260 + (camX*0.15)) % (W+260) - 130;
+      const by = 70 + (i%6)*70;
+      const s = 10 + (i%5)*3;
+      drawHeart(bx, by, s, "#ffffff");
+    }
+    ctx.restore();
+  }
+ 
+  function drawCloud(x,y,r){
+    ctx.save();
+    ctx.globalAlpha = 0.55;
+    ctx.fillStyle = COLORS.cloud;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI*2);
+    ctx.arc(x+r*0.9, y+2, r*0.8, 0, Math.PI*2);
+    ctx.arc(x-r*0.9, y+6, r*0.75, 0, Math.PI*2);
+    ctx.arc(x, y+10, r*0.9, 0, Math.PI*2);
+    ctx.fill();
+    ctx.restore();
+  }
+ 
+  function drawPlatform(p){
+    const x = p.x - camX;
+    ctx.save();
+    ctx.fillStyle = COLORS.platform;
+    ctx.strokeStyle = COLORS.platformEdge;
+    ctx.lineWidth = 2;
+    roundRect(x, p.y, p.w, p.h, 12, true, true);
+    ctx.restore();
+  }
+ 
+  function drawSafeZone() {
+    const x = safeZone.x - camX;
+    ctx.save();
+    ctx.fillStyle = COLORS.safe;
+    ctx.strokeStyle = COLORS.safeEdge;
+    ctx.lineWidth = 2;
+ 
+    // cozy rounded capsule
+    roundRect(x, safeZone.y, safeZone.w, safeZone.h, 18, true, true);
+ 
+    // label
+    ctx.globalAlpha = 0.9;
+    ctx.fillStyle = COLORS.ink;
+    ctx.font = "800 16px ui-rounded, system-ui, sans-serif";
+    ctx.fillText("SAFE ZONE 💞", x + 18, safeZone.y + 30);
+ 
+    ctx.globalAlpha = 0.75;
+    ctx.font = "700 12px ui-rounded, system-ui, sans-serif";
+    ctx.fillText("Get here to stay whole", x + 18, safeZone.y + 50);
+    ctx.restore();
+  }
+ 
+function drawArrow(ar) {
+  const x = ar.x - camX;
+  const y = ar.y;
+
+  ctx.save();
+  ctx.translate(x + ar.w / 2, y + ar.h / 2);
+  ctx.rotate(ar.rot);
+  ctx.translate(-ar.w / 2, -ar.h / 2);
+
+  // Shaft
+  ctx.fillStyle = "#f07aa6";
+  roundRect(6, ar.h / 2 - 3, ar.w - 12, 6, 4, true, false);
+
+  // Heart-shaped arrowhead (Cupid style)
+  ctx.save();
+  ctx.translate(ar.w - 4, ar.h / 2);
+  ctx.scale(0.6, 0.6);
+  drawHeart(0, -12, 10, "#ff4b92");
+  ctx.restore();
+
+  // Soft feather fletching
+  ctx.fillStyle = "#ffd6e7";
+  ctx.beginPath();
+  ctx.moveTo(6, ar.h / 2);
+  ctx.lineTo(-10, -6);
+  ctx.lineTo(-10, 6);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.moveTo(6, ar.h / 2);
+  ctx.lineTo(-14, -10);
+  ctx.lineTo(-14, -2);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.moveTo(6, ar.h / 2);
+  ctx.lineTo(-14, 10);
+  ctx.lineTo(-14, 2);
+  ctx.closePath();
+  ctx.fill();
+
+  // Subtle shine
+  ctx.globalAlpha = 0.35;
+  ctx.strokeStyle = "#ffffff";
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(10, ar.h / 2 - 2);
+  ctx.lineTo(ar.w - 14, ar.h / 2 - 2);
+  ctx.stroke();
+
+  ctx.restore();
+}
+
+ 
+  function drawPlayer() {
+    const x = player.x - camX + player.w/2;
+    const y = player.y + player.h/2;
+ 
+    ctx.save();
+    // cute bob if moving
+    const bob = Math.sin((player.x + performance.now()*0.02) * 0.04) * 1.3;
+    ctx.translate(x, y + bob);
+ 
+    if (!player.broken) {
+      // Whole heart
+      drawHeart(0, 0, 22, COLORS.accent);
+      // little shine
+      ctx.globalAlpha = 0.25;
+      drawHeart(-5, -6, 10, "#ffffff");
+      ctx.globalAlpha = 1;
+    } else {
+      // Broken heart: two halves + crack
+      ctx.save();
+      ctx.translate(-6, 0);
+      ctx.rotate(-0.22);
+      drawHeart(0, 0, 18, COLORS.broken);
+      ctx.restore();
+ 
+      ctx.save();
+      ctx.translate(8, 2);
+      ctx.rotate(0.24);
+      drawHeart(0, 0, 18, COLORS.broken);
+      ctx.restore();
+ 
+      ctx.strokeStyle = "#ffffff";
+      ctx.globalAlpha = 0.7;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(-2, -18);
+      ctx.lineTo(2, -8);
+      ctx.lineTo(-4, 0);
+      ctx.lineTo(5, 10);
+      ctx.lineTo(0, 20);
+      ctx.stroke();
+    }
+ 
+    ctx.restore();
+  }
+ 
+  function drawHeart(cx, cy, size, color) {
+    // cx,cy in current coordinate space
+    ctx.save();
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    // classic heart param-ish shape using bezier
+    const s = size;
+    ctx.moveTo(cx, cy + s*0.35);
+    ctx.bezierCurveTo(cx, cy, cx - s, cy, cx - s, cy + s*0.35);
+    ctx.bezierCurveTo(cx - s, cy + s*0.85, cx - s*0.2, cy + s*1.08, cx, cy + s*1.35);
+    ctx.bezierCurveTo(cx + s*0.2, cy + s*1.08, cx + s, cy + s*0.85, cx + s, cy + s*0.35);
+    ctx.bezierCurveTo(cx + s, cy, cx, cy, cx, cy + s*0.35);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+ 
+  function roundRect(x, y, w, h, r, fill, stroke) {
+    const rr = Math.min(r, w/2, h/2);
+    ctx.beginPath();
+    ctx.moveTo(x+rr, y);
+    ctx.arcTo(x+w, y, x+w, y+h, rr);
+    ctx.arcTo(x+w, y+h, x, y+h, rr);
+    ctx.arcTo(x, y+h, x, y, rr);
+    ctx.arcTo(x, y, x+w, y, rr);
+    ctx.closePath();
+    if (fill) ctx.fill();
+    if (stroke) ctx.stroke();
+  }
+ 
+  function render() {
+    ctx.clearRect(0,0,W,H);
+ 
+    // dreamy clouds
+    drawCloud(140 - camX*0.08, 110, 34);
+    drawCloud(340 - camX*0.10, 150, 26);
+    drawCloud(760 - camX*0.06, 120, 36);
+    drawCloud(920 - camX*0.05, 170, 24);
+ 
+    drawSoftHeartsBackground();
+ 
+    // ground haze
+    ctx.save();
+    ctx.globalAlpha = 0.10;
+    ctx.fillStyle = "#ffffff";
+    roundRect(-30, 470, W+60, 120, 30, true, false);
+    ctx.restore();
+ 
+    // platforms
+    for (const p of platforms) drawPlatform(p);
+ 
+    // safe zone
+    drawSafeZone();
+ 
+    // arrows
+    for (const a of arrows) drawArrow(a);
+ 
+    // player
+    drawPlayer();
+ 
+    // vignette
+    ctx.save();
+    ctx.globalAlpha = 0.10;
+    const g = ctx.createRadialGradient(W/2, H/2, 140, W/2, H/2, 560);
+    g.addColorStop(0, "rgba(255,255,255,0)");
+    g.addColorStop(1, "rgba(90,42,58,0.35)");
+    ctx.fillStyle = g;
+    ctx.fillRect(0,0,W,H);
+    ctx.restore();
+ 
+    // overlays for start/win/lose
+    if (!running) {
+      ctx.save();
+      ctx.fillStyle = "rgba(255,242,247,0.78)";
+      roundRect(210, 170, W-420, 210, 22, true, false);
+ 
+      ctx.fillStyle = COLORS.ink;
+      ctx.textAlign = "center";
+ 
+      ctx.font = "900 28px ui-rounded, system-ui, sans-serif";
+const headline = won
+  ? "Congrats! 💖"
+  : (player.broken ? "Oh no! 💔" : "Heart Jump 💗");
+
+      ctx.fillText(headline, W/2, 230);
+ 
+      ctx.globalAlpha = 0.85;
+      ctx.font = "700 15px ui-rounded, system-ui, sans-serif";
+      const line1 = won
+        ? "Warm, whole, and safe. Press R to play again."
+        : (player.broken
+          ? "Press R to try again — you’ve got this."
+          : "Move with ← → or A/D. Jump with Space/W/↑. Dodge arrows, reach the Safe Zone.");
+      ctx.fillText(line1, W/2, 265);
+ 
+      ctx.globalAlpha = 0.75;
+      ctx.font = "700 13px ui-rounded, system-ui, sans-serif";
+      ctx.fillText("Tip: jumping late is okay (coyote time), and jump presses buffer a bit.", W/2, 295);
+ 
+      ctx.restore();
+    }
+  }
+ 
+  // ----------------------------
+  // Main loop
+  // ----------------------------
+  function loop(t) {
+    const dt = Math.min(0.033, (t - lastT) / 1000);
+    lastT = t;
+ 
+    const nowSec = t / 1000;
+ 
+    if (running) step(dt, nowSec);
+    render();
+ 
+    requestAnimationFrame(loop);
+  }
+ 
+  // ----------------------------
+  // UI buttons
+  // ----------------------------
+  startBtn.addEventListener("click", () => {
+    if (!running && !won && !player.broken) {
+      // first start state, but we also allow restart from overlays via R.
+    }
+    reset();
+    startBtn.textContent = "Restart (with heartbeat)";
+  });
+ 
+  muteBtn.addEventListener("click", () => setMuted(!isMuted));
+ 
+  // Start in paused intro screen
+  statusText.textContent = "Click Start to begin 💗";
+  requestAnimationFrame(loop);
+ 
+})();
+</script>
+</body>
+</html>
